@@ -37,15 +37,29 @@ warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
 
 
 def index(request):
-    devices = Device.objects.all().order_by('id')
-    devices_count = Device.objects.count()  # A small optimization to avoid querying all then counting
-    projects = Projects.objects.all()
-    # Count the total number of projects
-    total_projects = Projects.objects.count()
+    try:
+        devices = Device.objects.all().order_by('id')
+        devices_count = Device.objects.count()  # A small optimization to avoid querying all then counting
+    except Exception:
+        # Database tables not migrated yet or no devices
+        devices = []
+        devices_count = 0
+    
+    try:
+        projects = Projects.objects.all()
+        # Count the total number of projects
+        total_projects = Projects.objects.count()
+    except Exception:
+        projects = []
+        total_projects = 0
 
-    # Count the total number of Cells across all Projects
-    total_cells = Cells.objects.count()
-    good_cells = Cells.objects.filter(capacity__gt=1000).count()
+    try:
+        # Count the total number of Cells across all Projects
+        total_cells = Cells.objects.count()
+        good_cells = Cells.objects.filter(capacity__gt=1000).count()
+    except Exception:
+        total_cells = 0
+        good_cells = 0
 
     context = {
         "page_title": "Devices",
@@ -60,11 +74,17 @@ def index(request):
     return render(request, 'megacellcnc/index.html', context)
 
 def settings(request):
-    projects = Projects.objects.all()
+    try:
+        projects = Projects.objects.all()
+    except Exception:
+        projects = []
 
-    devices = Device.objects.all().order_by('id')
-    devices_count = Device.objects.all().count()
-    projects = Projects.objects.all()
+    try:
+        devices = Device.objects.all().order_by('id')
+        devices_count = Device.objects.all().count()
+    except Exception:
+        devices = []
+        devices_count = 0
     context = {
         "page_title": "Settings",
         "devices": devices,
