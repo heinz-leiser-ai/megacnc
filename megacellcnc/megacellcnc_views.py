@@ -323,16 +323,28 @@ def get_battery_cells(request):
 
 
 def database(request):
+    from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
     projects = Projects.objects.all()
     project_id = request.GET.get('project')
 
     if project_id == 'all' or project_id is None:
-        cells = Cells.objects.all().order_by('id')
+        cells_queryset = Cells.objects.all().order_by('id')
         selected_project_name = "All"
     else:
-        cells = Cells.objects.filter(project__id=project_id).order_by().order_by('id')
+        cells_queryset = Cells.objects.filter(project__id=project_id).order_by('id')
         selected_project_name = Projects.objects.get(id=project_id).Name
+
+    # Pagination: 100 Zellen pro Seite
+    paginator = Paginator(cells_queryset, 100)
+    page = request.GET.get('page', 1)
+    
+    try:
+        cells = paginator.page(page)
+    except PageNotAnInteger:
+        cells = paginator.page(1)
+    except EmptyPage:
+        cells = paginator.page(paginator.num_pages)
 
     context = {
         "page_title":"Devices",
