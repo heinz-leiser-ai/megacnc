@@ -322,7 +322,7 @@
                                     <div class="input-group" style="width: 250px;">
                                         <span class="input-group-text"><i class="fa fa-search"></i></span>
                                         <input type="text" class="form-control" id="serialSearch" 
-                                               placeholder="Search Serial No..." value="{{ request.GET.search|default:'' }}" />
+                                               placeholder="ID-Nr. suchen..." value="{{ request.GET.search|default:'' }}" />
                                         <button class="btn btn-outline-secondary" type="button" id="clearSearch" title="Clear search">
                                             <i class="fa fa-times"></i>
                                         </button>
@@ -772,7 +772,7 @@ $(document).ready(function() {
         updateDeleteButton();
     });
     
-    // Serial Number Search with AJAX (no page reload)
+    // ID-Nr. Search with AJAX (no page reload)
     let searchTimeout;
     let currentSearchValue = '{{ search_query|default:"" }}';
     let currentYearFilter = '{{ selected_year|default:"" }}';
@@ -786,12 +786,9 @@ $(document).ready(function() {
         clearTimeout(searchTimeout);
         const searchValue = $(this).val().trim();
         
-        // Nur suchen ab 3 Zeichen oder wenn leer (zum Zurücksetzen)
-        if (searchValue.length >= 3 || searchValue.length === 0) {
-            searchTimeout = setTimeout(function() {
-                performAjaxSearch(searchValue);
-            }, 1000); // 1000ms Debounce
-        }
+        searchTimeout = setTimeout(function() {
+            performAjaxSearch(searchValue);
+        }, 1000);
     });
     
     // Enter-Taste für sofortige Suche
@@ -800,9 +797,7 @@ $(document).ready(function() {
             e.preventDefault();
             clearTimeout(searchTimeout);
             const searchValue = $(this).val().trim();
-            if (searchValue.length >= 3 || searchValue.length === 0) {
-                performAjaxSearch(searchValue);
-            }
+            performAjaxSearch(searchValue);
         }
     });
     

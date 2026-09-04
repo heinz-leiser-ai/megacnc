@@ -26,7 +26,6 @@ from django.utils import timezone
 from django.db.models import F
 from mccprolib.api import MegacellCharger
 from megacellcnc.tasks import dispatch_command, get_device_config, save_device_config
-import re
 import pandas as pd
 import datetime
 import pytz
@@ -461,6 +460,16 @@ def update_battery_name(request):
     return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
 
 
+def _filter_cells_by_id(queryset, search_query):
+    """Prefix search on Cells.id. Returns (queryset, result_count_or_none)."""
+    if not search_query:
+        return queryset, None
+    from django.db.models import CharField
+    from django.db.models.functions import Cast
+    qs = queryset.annotate(id_str=Cast('id', CharField())).filter(id_str__startswith=search_query)
+    return qs, qs.count()
+
+
 def get_cells(request):
     project_id = request.GET.get('project_id')
     if project_id == 'all':
@@ -470,17 +479,13 @@ def get_cells(request):
 
     cells_data = []
     for cell in cells:
-        match = re.search(r'-S(\d+)', cell.UUID)
-        if match:
-            serial_number = int(match.group(1))
-            cdata = {
-                'id': serial_number,
-                'capacity': cell.capacity,
-                'uuid': cell.UUID,
-                'esr': cell.esr,
-                'voltage': cell.voltage
-            }
-            cells_data.append(cdata)
+        cells_data.append({
+            'id': cell.id,
+            'capacity': cell.capacity,
+            'uuid': cell.UUID,
+            'esr': cell.esr,
+            'voltage': cell.voltage
+        })
 
     return JsonResponse({'cells': cells_data})
 
@@ -492,18 +497,14 @@ def get_battery_cells(request):
     battery = Batteries.objects.get(id=battery_id)
     cells_data = []
     for cell in battery.battery_cells.all():
-        match = re.search(r'-S(\d+)', cell.UUID)
-        if match:
-            serial_number = int(match.group(1))
-            cdata = {
-                'id': serial_number,
-                'capacity': cell.capacity,
-                'uuid': cell.UUID,
-                'bat_position': cell.bat_position,
-                'esr': cell.esr,
-                'voltage': cell.voltage
-            }
-            cells_data.append(cdata)
+        cells_data.append({
+            'id': cell.id,
+            'capacity': cell.capacity,
+            'uuid': cell.UUID,
+            'bat_position': cell.bat_position,
+            'esr': cell.esr,
+            'voltage': cell.voltage
+        })
 
     return JsonResponse({
         'cells': cells_data,
@@ -569,16 +570,8 @@ def database(request):
         else:
             battery_filter = ''
 
-    # Partial Match Suche nur in Seriennummer (ab 3 Zeichen)
-    search_results = None
-    if search_query and len(search_query) >= 3:
-        # Sucht nur im Seriennummern-Teil nach "-S"
-        # UUID Format: D{YYYYMMDD}-S{SerialNo} z.B. D20220922-S002984
-        # "104" findet: -S000104, -S010473, -S723104
-        # Aber NICHT: D20230104-S006627 (104 ist im Datum)
-        
-        cells_queryset = cells_queryset.filter(UUID__regex=rf'-S.*{search_query}')
-        search_results = cells_queryset.count()
+    # Suche nach ID-Nr. (Präfix, ab 1 Zeichen)
+    cells_queryset, search_results = _filter_cells_by_id(cells_queryset, search_query)
     
     # Extrahiere alle verfügbaren Jahre aus UUIDs
     # Verwende SQL für Performance statt Python-Loop
@@ -670,14 +663,8 @@ def database_search_ajax(request):
         if Batteries.objects.filter(pk=bid).exists():
             cells_queryset = cells_queryset.filter(battery_id=bid)
     
-    # Partial Match Search nur in Seriennummer
-    search_results = None
-    if search_query and len(search_query) >= 3:
-        # Sucht nur im Seriennummern-Teil nach "-S"
-        # "104" findet: -S000104, -S010473, -S723104
-        # Aber NICHT: D20230104-S006627 (104 ist im Datum)
-        cells_queryset = cells_queryset.filter(UUID__regex=rf'-S.*{search_query}')
-        search_results = cells_queryset.count()
+    # Suche nach ID-Nr. (Präfix, ab 1 Zeichen)
+    cells_queryset, search_results = _filter_cells_by_id(cells_queryset, search_query)
     
     # Pagination mit dynamischer Seitengröße
     paginator = Paginator(cells_queryset, per_page)
@@ -916,11 +903,8 @@ def get_updated_slots(request, device_id):
         }
 
         if slot.active_cell:
-            match = re.search(r'-S(\d+)', slot.active_cell.UUID)
-            serial_number = int(match.group(1))
-
             slot_info.update({
-                'active_cell_uuid': serial_number,
+                'active_cell_uuid': slot.active_cell.id,
                 'active_cell_type': slot.active_cell.cell_type,
             })
 
@@ -957,10 +941,8 @@ def get_project_slots(request, project_id):
             }
 
             if slot.active_cell:
-                match = re.search(r'-S(\d+)', slot.active_cell.UUID)
-                serial_number = int(match.group(1))
                 slot_info.update({
-                    'active_cell_uuid': serial_number,
+                    'active_cell_uuid': slot.active_cell.id,
                     'active_cell_type': slot.active_cell.cell_type,
                 })
 

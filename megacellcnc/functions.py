@@ -12,7 +12,6 @@ from django.utils import timezone
 from PIL import Image, ImageFont, ImageDraw
 import os
 from django.conf import settings as main_settings
-import qrcode
 import base64
 from io import BytesIO
 import ipaddress
@@ -164,7 +163,14 @@ def generate_uuid_for_cell(project_id):
 
 
 def add_new_cell(device, slot):
-    project_instance = get_object_or_404(Projects, id=device.project_id)
+    if not device.project_id:
+        logger.warning("add_new_cell: device %s has no project, skip save", device.ip)
+        return None
+    try:
+        project_instance = Projects.objects.get(id=device.project_id)
+    except Projects.DoesNotExist:
+        logger.warning("add_new_cell: project %s missing for device %s", device.project_id, device.ip)
+        return None
     uuid = generate_uuid_for_cell(device.project_id)
 
     # Create and save the new cell
@@ -463,12 +469,34 @@ def format_cap(capacity):
     return cap, capUnit
 
 
+def _label_cell_id(label_item):
+    return str(label_item.get("id") or label_item.get("serial") or "")
+
+
+def _label_dict_from_cell(acell, ip, slot_number):
+    formated_date = acell.insertion_date.strftime('%Y-%m-%d')
+    return {
+        "id": acell.id,
+        "serial": str(acell.id),
+        "uuid": acell.UUID,
+        "cap": acell.capacity,
+        "esr": acell.esr,
+        "temp": acell.max_temp_discharging,
+        "minV": acell.min_voltage,
+        "storeV": acell.store_voltage,
+        "maxV": acell.max_voltage,
+        "ip": ip,
+        "slot": slot_number,
+        "date": formated_date,
+    }
+
+
 def draw_dual_label(label_data):
 
     if len(label_data) == 0:
-        label_data = [{"serial": "000001", "uuid": "D20240219-S000001", "cap": 32450,
+        label_data = [{"id": 1, "serial": "1", "uuid": "D20240219-S000001", "cap": 32450,
                        "ip": "192.168.1.104", "slot": 1, "date": "2024-02-19"},
-                      {"serial": "000002", "uuid": "D20240219-S000002", "cap": 3200,
+                      {"id": 2, "serial": "2", "uuid": "D20240219-S000002", "cap": 3200,
                        "ip": "192.168.1.104", "slot": 2, "date": "2024-02-19"}]
 
     templates_folder = os.path.join(main_settings.BASE_DIR, 'static', 'labeltemplates')
@@ -490,16 +518,7 @@ def draw_dual_label(label_data):
 
         capacity, unit = format_cap(l["cap"])
 
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data("%s-C%s-%s" % (l["uuid"], capacity, unit))
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill='black', back_color='white')
-        qr_img = qr_img.crop((0, 0, 350, 350))
-        qr_img = qr_img.resize((220, 220))
-        label.paste(qr_img, (300, offset + 30))
-
-        serial = str(l["serial"])
-        header_text = "%s-C:%s" % (serial, capacity)
+        header_text = "%s-C:%s" % (_label_cell_id(l), capacity)
         label_editable.text((10, offset + -20), header_text, (0, 0, 0), font=header_font)
 
         last_ip_num = l["ip"].split(".")[-1]
@@ -533,7 +552,7 @@ def draw_dual_label(label_data):
 def draw_square_label(label_data, custom_field1):
 
     if len(label_data) == 0:
-        label_data = [{"serial": "000001", "uuid": "D20240219-S000001", "cap": 3245,
+        label_data = [{"id": 1, "serial": "1", "uuid": "D20240219-S000001", "cap": 3245,
                        "ip": "192.168.1.104", "slot": 1, "date": "2024-02-23"}]
 
     templates_folder = os.path.join(main_settings.BASE_DIR, 'static', 'labeltemplates')
@@ -555,23 +574,7 @@ def draw_square_label(label_data, custom_field1):
 
     capacity, unit = format_cap(l["cap"])
 
-    # QR Code Block ---------
-    qr = qrcode.QRCode(
-        version=1,
-        box_size=10,
-        border=5)
-
-    qr.add_data("%s-C%s-%s" % (l["uuid"], capacity, unit))
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill='black', back_color='white')
-    qr_img = qr_img.crop((0, 0, 350, 350))
-    qr_img = qr_img.resize((250, 250))
-
-    label.paste(qr_img, (-30, 200))
-    # QR Code Block End ---------
-
-    serial = str(l["serial"])
-    header_text = "%s-C:%s" % (serial, capacity)
+    header_text = "%s-C:%s" % (_label_cell_id(l), capacity)
     label_editable.text((20, -20), header_text, (0, 0, 0), font=header_font)
 
     last_ip_num = l["ip"].split(".")[-1]
@@ -610,7 +613,7 @@ def draw_landscape_label(label_data, custom_field1):
 
     if len(label_data) == 0:
         label_data = [
-            {"serial": "000001", "uuid": "D20240223-S000001", "cap": 3245,
+            {"id": 1, "serial": "1", "uuid": "D20240223-S000001", "cap": 3245,
              "ip": "192.168.1.104", "slot": 1, "date": "2024-02-23"}]
 
     templates_folder = os.path.join(main_settings.BASE_DIR, 'static', 'labeltemplates')
@@ -632,16 +635,7 @@ def draw_landscape_label(label_data, custom_field1):
 
     capacity, unit = format_cap(l["cap"])
 
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data("%s-C%s-%s" % (l["uuid"], capacity, unit))
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill='black', back_color='white')
-    qr_img = qr_img.crop((0, 0, 350, 350))
-    qr_img = qr_img.resize((190, 190))
-    label.paste(qr_img, (260, 80))
-
-    serial = str(l["serial"])
-    header_text = "%s-C:%s" % (serial, capacity)
+    header_text = "%s-C:%s" % (_label_cell_id(l), capacity)
     label_editable.text((5, -20), header_text, (0, 0, 0), font=header_font)
 
     last_ip_num = l["ip"].split(".")[-1]
@@ -676,22 +670,9 @@ def gather_label_data(deviceId, slots):
 
     for slot in filtered_slots:
         acell = slot.active_cell
-        match = re.search(r'-S(\d+)', acell.UUID)
-
-        if match:
-            # Keep the full serial number string (e.g. "005450")
-            cserial = match.group(1)
-        else:
-            cserial = "000000"
-
-        formated_date = acell.insertion_date.strftime('%Y-%m-%d')
-
-        ldat = {"serial": cserial, "uuid": acell.UUID, "cap": acell.capacity, "esr": acell.esr,
-                "temp": acell.max_temp_discharging, "minV": acell.min_voltage,
-                "storeV": acell.store_voltage, "maxV": acell.max_voltage,
-                "ip": device.ip, "slot": slot.slot_number, "date": formated_date}
-
-        label_data.append(ldat)
+        if not acell:
+            continue
+        label_data.append(_label_dict_from_cell(acell, device.ip, slot.slot_number))
 
     return label_data
 
@@ -703,22 +684,7 @@ def gather_label_cell_data(cells):
     label_data = []
 
     for acell in filtered_cells:
-        match = re.search(r'-S(\d+)', acell.UUID)
-
-        if match:
-            # Keep the full serial number string (e.g. "005450")
-            cserial = match.group(1)
-        else:
-            cserial = "000000"
-
-        formated_date = acell.insertion_date.strftime('%Y-%m-%d')
-
-        ldat = {"serial": cserial, "uuid": acell.UUID, "cap": acell.capacity, "esr": acell.esr,
-                "temp": acell.max_temp_discharging, "minV": acell.min_voltage,
-                "storeV": acell.store_voltage, "maxV": acell.max_voltage,
-                "ip": acell.device_ip, "slot": acell.device_slot, "date": formated_date}
-
-        label_data.append(ldat)
+        label_data.append(_label_dict_from_cell(acell, acell.device_ip, acell.device_slot))
 
     return label_data
 

@@ -14,15 +14,59 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+ACTIVE_TEST_STATES = frozenset([
+    "LVC Charging", "Started Charging", "Cooldown", "Started Discharging", "ESR Reading", "Resting",
+    "Started Store Charging", "Started Store Discharging", "Dispose started", "mCap Started Charging",
+    "mCap Started Discharging", "mCap Store Charging", "mCap Store Discharging", "Wait For ESR Test",
+    "Cell rest 5 Min",
+])
+
+COMPLETE_STATES = frozenset(["Stored"])
+
 
 def constrain_value(min_allowed, max_allowed, actual_value):
     return max(min_allowed, min(max_allowed, actual_value))
 
 
-def update_cell_data(device, slot):
+def _cell_num(cell, key, default=0):
+    value = cell.get(key, default)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
-    # Check if we should save this cell and generate serial
-    if (slot.current > 50 or slot.current < -50) and not slot.saved:
+
+def _slot_count_from_identity(device_type):
+    if not isinstance(device_type, dict):
+        return None
+    cht = device_type.get("ChT")
+    if cht in ("MCCPro", "MCCReg"):
+        return device_type.get("CeC") or device_type.get("ByC")
+    if cht == "MCC" or "McC" in device_type:
+        return device_type.get("ByC") or device_type.get("CeC")
+    return device_type.get("CeC") or device_type.get("ByC")
+
+
+def _is_test_finished(slot):
+    if slot.state in COMPLETE_STATES:
+        return True
+    current = abs(slot.current or 0)
+    capacity = slot.capacity or 0
+    if (
+        current < 50
+        and capacity > 0
+        and slot.state not in ACTIVE_TEST_STATES
+        and slot.state != "Not Inserted"
+    ):
+        return True
+    return False
+
+
+def update_cell_data(device, slot):
+    current = slot.current or 0
+    if (current > 50 or current < -50) and not slot.saved:
         add_new_cell(device, slot)
 
     cell = slot.active_cell
@@ -49,13 +93,7 @@ def update_cell_data(device, slot):
         cell.test_duration = slot.action_running_time
         cell.save()
 
-        record_states = ["LVC Charging", "Started Charging", "Cooldown", "Started Discharging", "ESR Reading", "Resting",
-                         "Started Store Charging", "Started Store Discharging", "Dispose started", "mCap Started Charging",
-                         "mCap Started Discharging", "mCap Store Charging", "mCap Store Discharging", "Wait For ESR Test",
-                         "Cell rest 5 Min"]
-
-        if slot.state in record_states:
-            # Record data points
+        if slot.state in ACTIVE_TEST_STATES:
             new_data = CellTestData(
                 cell=cell,
                 voltage=slot.voltage,
@@ -69,23 +107,20 @@ def update_cell_data(device, slot):
             )
             new_data.save()
 
+        if cell.available != "Yes" and _is_test_finished(slot):
+            mark_cell_available(cell, removed=False)
 
-def cell_test_complete(cell):
-    cell.removal_date = timezone.now()
-    cell.status = "Removed"
-    cell.available = "Yes"
 
+def apply_test_stats(cell):
     average_charge_temp_data = cell.test_data.filter(status='Started Charging').aggregate(Avg('temperature'))
     average_charge_temperature = average_charge_temp_data.get('temperature__avg') or 0
 
     average_discharge_temp_data = cell.test_data.filter(status='Started Discharging').aggregate(Avg('temperature'))
     average_discharge_temperature = average_discharge_temp_data.get('temperature__avg') or 0
 
-    # Calculate the maximum temperature during charging
     max_temp_charging_data = cell.test_data.filter(status='Started Charging').aggregate(Max('temperature'))
     max_temp_charging = max_temp_charging_data.get('temperature__max') or 0
 
-    # Calculate the maximum temperature during discharging
     max_temp_discharging_data = cell.test_data.filter(status='Started Discharging').aggregate(Max('temperature'))
     max_temp_discharging = max_temp_discharging_data.get('temperature__max') or 0
 
@@ -94,69 +129,82 @@ def cell_test_complete(cell):
     cell.max_temp_charging = max_temp_charging
     cell.max_temp_discharging = max_temp_discharging
 
+
+def mark_cell_available(cell, *, removed=False):
+    if not cell:
+        return
+    if not cell.removal_date:
+        cell.removal_date = timezone.now()
+    cell.available = "Yes"
+    if removed:
+        cell.status = "Removed"
+    apply_test_stats(cell)
     cell.save()
+
+
+def cell_test_complete(cell):
+    mark_cell_available(cell, removed=True)
 
 
 def update_slot_data(device_model, tester, device_slot_count):
     slots = device_model.slots.all()
     current_slot_count = slots.count()
 
-    # Updating slot count if it changed
     if current_slot_count != device_slot_count:
-        # If different, delete all current slots and create new ones
-        with transaction.atomic():  # Use a transaction to ensure atomicity
-            # Delete all current slots
+        with transaction.atomic():
             slots.delete()
-
-            # Create new slots
-            for slot_num in range(1, device_slot_count + 1):  # Starting from 1 to slot_count
+            for slot_num in range(1, device_slot_count + 1):
                 Slot.objects.create(device=device_model, slot_number=slot_num)
-
         slots = device_model.slots.all()
 
     data = tester.get_cells_data()
+    cells_list = data.get("cells") if isinstance(data, dict) else None
+    if not cells_list:
+        logger.warning("update_slot_data: no cells from %s", device_model.ip)
+        return
 
-    # First, sort the list of dictionaries by 'GiD'
-    if "GiD" in data["cells"][0]:
-        data_sorted = sorted(data["cells"], key=itemgetter('GiD'))
+    use_gid = device_model.type == "MCCPro" and "GiD" in cells_list[0]
+    group_key = "GiD" if use_gid else "CiD"
+    try:
+        data_sorted = sorted(cells_list, key=itemgetter(group_key))
+        groups = groupby(data_sorted, key=itemgetter(group_key))
+    except KeyError:
+        logger.warning("update_slot_data: missing %s in cells from %s", group_key, device_model.ip)
+        return
 
-        # Then, group by 'GiD'
-        groups = groupby(data_sorted, key=itemgetter('GiD'))
-    else:
-        data_sorted = sorted(data["cells"], key=itemgetter('CiD'))
-        groups = groupby(data_sorted, key=itemgetter('CiD'))
-
-    # To access the groups, you can iterate over them
     for gid, items in groups:
-        slot_num = gid + 1
-        cell = next(items)
+        try:
+            slot_num = gid + 1
+            cell = next(items)
 
-        slot = device_model.slots.get(slot_number=slot_num)
-        slot.voltage = cell["VlT"]
-        slot.current = cell["AmP"]
-        slot.capacity = cell["CaP"]
-        slot.charge_capacity = cell["CCa"]
-        slot.state = cell["StS"]
+            slot = device_model.slots.get(slot_number=slot_num)
+            slot.voltage = _cell_num(cell, "VlT")
+            slot.current = int(_cell_num(cell, "AmP"))
+            slot.capacity = _cell_num(cell, "CaP")
+            slot.charge_capacity = _cell_num(cell, "CCa")
+            slot.state = cell.get("StS") or ""
 
-        if slot.saved and cell["StS"] == "Not Inserted":
-            slot.saved = False
-            if slot.active_cell:  # Check if there's an active cell
-                cell_test_complete(slot.active_cell)
+            if slot.saved and slot.state == "Not Inserted":
+                slot.saved = False
+                if slot.active_cell:
+                    cell_test_complete(slot.active_cell)
+                slot.active_cell = None
 
-            slot.active_cell = None
+            slot.esr = _cell_num(cell, "esr")
+            slot.action_running_time = _cell_num(cell, "AcL")
+            slot.discharge_cycles_set = int(_cell_num(cell, "DiC"))
+            slot.completed_cycles = int(_cell_num(cell, "CoC"))
+            slot.temperature = _cell_num(cell, "TmP")
+            slot.max_volt = _cell_num(cell, "MaV")
+            slot.store_volt = _cell_num(cell, "StV")
+            slot.min_volt = _cell_num(cell, "MiV")
+            slot.save()
 
-        slot.esr = cell["esr"]
-        slot.action_running_time = cell["AcL"]
-        slot.discharge_cycles_set = cell["DiC"]
-        slot.completed_cycles = cell["CoC"]
-        slot.temperature = cell["TmP"]
-        slot.max_volt = cell["MaV"]
-        slot.store_volt = cell["StV"]
-        slot.min_volt = cell["MiV"]
-        slot.save()
-
-        # Update the cell data and saved cell
-        update_cell_data(device_model, slot)
+            update_cell_data(device_model, slot)
+        except Slot.DoesNotExist:
+            logger.warning("update_slot_data: slot %s missing on %s", slot_num, device_model.ip)
+        except Exception:
+            logger.exception("update_slot_data: failed slot on %s", device_model.ip)
 
 
 @shared_task(soft_time_limit=10, time_limit=15)
@@ -168,33 +216,37 @@ def check_device_status(device_id):
     try:
         portscan(80, device.ip, res_dict)
         print(res_dict)
-    except:
+    except Exception:
         pass
 
-    if device.ip in res_dict:
-        tester = MegacellCharger(device.ip)
-        if tester.device_type and "ChT" in tester.device_type:
-            device.status = "online"
-            device.type = tester.device_type["ChT"]
-            slot_count = tester.device_type["CeC"]
-            device.save()
-
-            update_slot_data(device, tester, slot_count)
-
-            return True
-
-        elif tester.device_type and 'McC' in tester.device_type:
-            device.status = "online"
-            device.type = "MCC"
-            slot_count = tester.device_type["ByC"]
-            device.save()
-            update_slot_data(device, tester, slot_count)
-
-            return True
-    else:
+    if device.ip not in res_dict:
         device.status = "offline"
         device.save()
         return False
+
+    tester = MegacellCharger(device.ip)
+    identity = tester.device_type
+    if not identity or identity == "Unknown" or not isinstance(identity, dict):
+        logger.warning("check_device_status: unknown identity for %s", device.ip)
+        return False
+
+    if "ChT" in identity:
+        device.type = identity["ChT"]
+    elif "McC" in identity:
+        device.type = "MCC"
+    else:
+        logger.warning("check_device_status: no ChT/McC for %s identity=%s", device.ip, identity)
+        return False
+
+    slot_count = _slot_count_from_identity(identity)
+    if not slot_count:
+        logger.warning("check_device_status: no slot count for %s identity=%s", device.ip, identity)
+        return False
+
+    device.status = "online"
+    device.save()
+    update_slot_data(device, tester, slot_count)
+    return True
 
 
 @shared_task

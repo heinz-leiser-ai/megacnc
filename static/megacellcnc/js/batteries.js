@@ -36,10 +36,24 @@ function fetchCells(projectId) {
     });
 }
 
-// Extract Cell-ID from UUID (e.g. "D20230620-S012559" -> "012559")
+// Extract Cell-ID from UUID (fallback if no DB-ID)
 function extractCellId(uuid) {
-    const match = uuid.match(/-S(\d+)/);
-    return match ? match[1] : uuid;
+    const match = (uuid || '').match(/-S(\d+)/);
+    return match ? match[1] : (uuid || '');
+}
+
+function cellDisplayId(cell) {
+    if (cell && cell.id != null && String(cell.id).indexOf('-S') === -1) {
+        return String(cell.id);
+    }
+    return extractCellId(cell && (cell.uuid || cell.id) || '');
+}
+
+function elementDisplayId(el) {
+    if (el && el.dataset && el.dataset.cellId) {
+        return el.dataset.cellId;
+    }
+    return extractCellId(el && el.dataset ? el.dataset.itemId : '');
 }
 
 function updateCellsList(cells) {
@@ -48,7 +62,7 @@ function updateCellsList(cells) {
     cells.forEach(function(cell) {
         var listItem = document.createElement('div');
         listItem.className = 'list-group-item';
-        const cellId = extractCellId(cell.uuid);
+        const cellId = cellDisplayId(cell);
         listItem.textContent = `${cellId} - ${cell.capacity} mAh - ${cell.esr} mΩ`;
         listItem.dataset.itemId = `${cell.uuid}`;
         listItem.dataset.cellId = cellId;
@@ -195,7 +209,7 @@ function fetchAndPopulateCells(batteryId, series, parallel) {
             
             if (slot) {
                 const listItem = document.createElement('li');
-                const cellId = extractCellId(cell.uuid);
+                const cellId = cellDisplayId(cell);
                 listItem.textContent = `${cellId}`;
                 listItem.className = 'list-group-item';
                 listItem.dataset.itemId = cell.uuid;
@@ -1338,7 +1352,7 @@ function getPackCells() {
         const slotMatch = slotId.match(/cell-(\d+)-(\d+)/);
         
         cells.push({
-            cellId: extractCellId(cell.dataset.itemId),
+            cellId: elementDisplayId(cell),
             uuid: cell.dataset.itemId,
             capacity: parseFloat(cell.dataset.capacity) || 0,
             esr: parseFloat(cell.dataset.esr) || 0,
@@ -1356,7 +1370,7 @@ function sortPackCellsInPlace(cells) {
     cells.sort((a, b) => {
         if (a.series !== b.series) return a.series - b.series;
         if (a.parallel !== b.parallel) return a.parallel - b.parallel;
-        return a.cellId.localeCompare(b.cellId);
+        return String(a.cellId).localeCompare(String(b.cellId), undefined, { numeric: true });
     });
 }
 
@@ -1905,6 +1919,7 @@ function saveCheckpoint(series, parallel, seriesArrays, iteration, totalSwaps, s
         const cellPositions = seriesArrays.map(seriesArr => 
             seriesArr.map(cell => ({
                 itemId: cell.dataset.itemId,
+                cellId: cell.dataset.cellId,
                 capacity: cell.dataset.capacity,
                 esr: cell.dataset.esr,
                 voltage: cell.dataset.voltage
@@ -2125,7 +2140,7 @@ function placeCellInSlot(cell, slot, animate = true) {
     if (!slot || !cell) return;
     
     // Extract Cell-ID for display
-    const cellId = extractCellId(cell.dataset.itemId || '');
+    const cellId = elementDisplayId(cell);
     
     // Update cell display to show just the ID (no title - we use custom tooltip)
     cell.textContent = cellId;
@@ -2656,10 +2671,11 @@ function restoreFromCheckpoint(checkpoint) {
             if (slot) {
                 const cell = document.createElement('li');
                 cell.className = 'list-group-item';
-                cell.dataset.itemId = cellData.id;
+                cell.dataset.itemId = cellData.itemId || cellData.id;
+                cell.dataset.cellId = cellData.cellId || cellDisplayId({ id: cellData.cellId, uuid: cell.dataset.itemId });
                 cell.dataset.capacity = cellData.capacity;
                 cell.dataset.esr = cellData.esr;
-                cell.textContent = extractCellId(cellData.id);
+                cell.textContent = cell.dataset.cellId;
                 slot.innerHTML = '';
                 slot.appendChild(cell);
                 seriesArrays[sIndex].push(cell);
@@ -3035,8 +3051,8 @@ async function replaceDefectiveCell(slotId) {
     const slotSeries = slotMatch ? parseInt(slotMatch[1]) : 0;
     const slotParallel = slotMatch ? parseInt(slotMatch[2]) : 0;
 
-    const oldCellId = extractCellId(defectiveCell.dataset.itemId);
-    const newCellId = extractCellId(replacement.dataset.itemId);
+    const oldCellId = elementDisplayId(defectiveCell);
+    const newCellId = elementDisplayId(replacement);
 
     try {
         const r = await fetch('/log-cell-replacement/', {

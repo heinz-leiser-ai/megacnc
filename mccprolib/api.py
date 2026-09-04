@@ -14,21 +14,15 @@ class MegacellCharger:
             self.device_type = "Unknown"
 
     def get_cells_data(self):
-        # First request for cells 1 to 8
-        data1 = {
-            "start": 1, "end": 8
-        }
-        result1 = self.get_data(data1, "api/get_cells_info")
-
-        # Second request for cells 9 to 16
-        data2 = {
-            "start": 9, "end": 16
-        }
-        result2 = self.get_data(data2, "api/get_cells_info")
-
-        # Combine the results
-        combined_result = {'cells': result1['cells'] + result2['cells']}
-        return combined_result
+        cells = []
+        for start, end in ((1, 8), (9, 16)):
+            try:
+                result = self.get_data({"start": start, "end": end}, "api/get_cells_info")
+                if isinstance(result, dict) and isinstance(result.get("cells"), list):
+                    cells.extend(result["cells"])
+            except Exception:
+                pass
+        return {"cells": cells}
 
     # set_cell used for setting cell commands
     # start charging: ach, start discharging: adc, stop charging: sc,
