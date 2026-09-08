@@ -146,17 +146,24 @@ def cell_test_complete(cell):
     mark_cell_available(cell, removed=True)
 
 
+def _ensure_slots(device_model, target_count):
+    """Add missing slots. Never delete — a wrong ByC/CeC must not wipe 16 slots down to 2."""
+    if not target_count or target_count < 1:
+        return
+    existing = set(device_model.slots.values_list('slot_number', flat=True))
+    for slot_num in range(1, int(target_count) + 1):
+        if slot_num not in existing:
+            Slot.objects.create(device=device_model, slot_number=slot_num)
+
+
+def _slot_number_from_api_id(api_id, min_id):
+    api_id = int(api_id)
+    if min_id >= 1:
+        return api_id
+    return api_id + 1
+
+
 def update_slot_data(device_model, tester, device_slot_count):
-    slots = device_model.slots.all()
-    current_slot_count = slots.count()
-
-    if current_slot_count != device_slot_count:
-        with transaction.atomic():
-            slots.delete()
-            for slot_num in range(1, device_slot_count + 1):
-                Slot.objects.create(device=device_model, slot_number=slot_num)
-        slots = device_model.slots.all()
-
     data = tester.get_cells_data()
     cells_list = data.get("cells") if isinstance(data, dict) else None
     if not cells_list:
@@ -165,6 +172,22 @@ def update_slot_data(device_model, tester, device_slot_count):
 
     use_gid = device_model.type == "MCCPro" and "GiD" in cells_list[0]
     group_key = "GiD" if use_gid else "CiD"
+    api_ids = []
+    for cell in cells_list:
+        if group_key in cell and cell[group_key] is not None:
+            try:
+                api_ids.append(int(cell[group_key]))
+            except (TypeError, ValueError):
+                pass
+    if not api_ids:
+        logger.warning("update_slot_data: missing %s in cells from %s", group_key, device_model.ip)
+        return
+
+    min_id = min(api_ids)
+    inferred_slots = max(_slot_number_from_api_id(i, min_id) for i in api_ids)
+    target_slots = max(int(device_slot_count or 0), inferred_slots, device_model.slots.count())
+    _ensure_slots(device_model, target_slots)
+
     try:
         data_sorted = sorted(cells_list, key=itemgetter(group_key))
         groups = groupby(data_sorted, key=itemgetter(group_key))
@@ -174,7 +197,7 @@ def update_slot_data(device_model, tester, device_slot_count):
 
     for gid, items in groups:
         try:
-            slot_num = gid + 1
+            slot_num = _slot_number_from_api_id(gid, min_id)
             cell = next(items)
 
             slot = device_model.slots.get(slot_number=slot_num)

@@ -1,7 +1,7 @@
 {% for cell in cells %}
 <tr>
     <td class="col-id">{{ cell.id }}</td>
-    <td class="col-serial">{{ cell.UUID|slice:"12:"|default:"-" }}</td>
+    <td class="col-serial" style="display:none;">{{ cell.UUID|slice:"12:"|default:"-" }}</td>
     <td class="col-available"><div class="status-{{ cell.available|lower|add:'-cell' }}">{{ cell.available|capfirst }}</div></td>
     <td class="col-condition">
         <span class="badge condition-badge condition-{{ cell.condition|default:'good' }}">

@@ -163,46 +163,21 @@ async function sendAction(action) {
 
 
     if (action === "print") {
-
+        const slots = slots_number.map(String);
         let doubleLabel = parseInt(includedValue($("#doubleLabel")));
 
         if (doubleLabel === 1) {
-            let batch_size = 2;
-            console.log("this is double label");
-            console.log(slots_number);
-            if (slots_number.length > 1) {
-                for (let i = 0; i <= slots_number.length - batch_size; i += batch_size) {
-                    let batch = slots_number.slice(i, i + batch_size);
-                    printLabels(batch, deviceId);
-                    await sleep(1000);
-                }
-
-                // Check if there's an uneven batch at the end
-                if (slots_number.length % batch_size !== 0) {
-                    // Get the last slot
-                    let lastBatch = slots_number.slice(-1);
-
-                    // Print the last slot
-                    printLabels(lastBatch, deviceId);
-                }
-            }
-
-
-
-
-
-        } else {
-            for (let i = 0; i < slots_number.length; i++) {
-                printLabels(slots_number[i], deviceId);
+            for (let i = 0; i < slots.length; i += 2) {
+                await printLabels(slots.slice(i, i + 2), deviceId);
                 await sleep(1000);
             }
-
-
+        } else {
+            for (let i = 0; i < slots.length; i++) {
+                await printLabels([slots[i]], deviceId);
+                await sleep(1000);
+            }
         }
-
-
     }
-
     else {
 
         // Setup the AJAX request

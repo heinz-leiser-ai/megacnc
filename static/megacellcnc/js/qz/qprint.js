@@ -1882,32 +1882,31 @@ function printImage() {
 
 
 async function printLabels(slots, deviceId) {
-
-    isDemo = 0;
+    const slotList = Array.isArray(slots) ? slots : [slots];
 
     try {
         const response = await fetch(`/print-label/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': getCookie('csrftoken')
-        },
-        body: JSON.stringify({isDemo, deviceId, slots })
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ isDemo: 0, deviceId, slots: slotList })
         });
         const data = await response.json();
+        if (!response.ok || !data.label) {
+            toastr.error(data.error || 'Keine Zelldaten zum Drucken', 'Fehler');
+            return;
+        }
 
-            var config = getUpdatedConfig();
-
-            var printData = [
+        var config = getUpdatedConfig();
+        var printData = [
             { type: 'pixel', format: 'image', flavor: 'base64', data: data.label }
-            ];
-
+        ];
         await qz.print(config, printData);
-
-            toastr.success(data.message, "Success");
+        toastr.success(data.message || 'Etikett gedruckt', 'Success');
     } catch (error) {
         console.error('Error printing label:', error);
         displayError(error);
     }
-
 }

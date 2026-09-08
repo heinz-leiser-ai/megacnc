@@ -491,9 +491,11 @@ def _label_dict_from_cell(acell, ip, slot_number):
     }
 
 
-def draw_dual_label(label_data):
+def draw_dual_label(label_data, use_demo=False):
 
     if len(label_data) == 0:
+        if not use_demo:
+            return None
         label_data = [{"id": 1, "serial": "1", "uuid": "D20240219-S000001", "cap": 32450,
                        "ip": "192.168.1.104", "slot": 1, "date": "2024-02-19"},
                       {"id": 2, "serial": "2", "uuid": "D20240219-S000002", "cap": 3200,
@@ -549,9 +551,11 @@ def draw_dual_label(label_data):
     return img_str
 
 
-def draw_square_label(label_data, custom_field1):
+def draw_square_label(label_data, custom_field1, use_demo=False):
 
     if len(label_data) == 0:
+        if not use_demo:
+            return None
         label_data = [{"id": 1, "serial": "1", "uuid": "D20240219-S000001", "cap": 3245,
                        "ip": "192.168.1.104", "slot": 1, "date": "2024-02-23"}]
 
@@ -609,9 +613,11 @@ def draw_square_label(label_data, custom_field1):
     return img_str
 
 
-def draw_landscape_label(label_data, custom_field1):
+def draw_landscape_label(label_data, custom_field1, use_demo=False):
 
     if len(label_data) == 0:
+        if not use_demo:
+            return None
         label_data = [
             {"id": 1, "serial": "1", "uuid": "D20240223-S000001", "cap": 3245,
              "ip": "192.168.1.104", "slot": 1, "date": "2024-02-23"}]
@@ -670,6 +676,12 @@ def gather_label_data(deviceId, slots):
 
     for slot in filtered_slots:
         acell = slot.active_cell
+        if not acell:
+            acell = (
+                Cells.objects.filter(device_ip=device.ip, device_slot=slot.slot_number)
+                .order_by('-id')
+                .first()
+            )
         if not acell:
             continue
         label_data.append(_label_dict_from_cell(acell, device.ip, slot.slot_number))

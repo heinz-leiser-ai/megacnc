@@ -1779,71 +1779,54 @@ def print_label(request):
     if request.method == "POST":
         try:
             data = json.loads(request.body)
-            isDemo = int(data.get('isDemo'))
+            isDemo = int(data.get('isDemo') or 0)
             deviceId = data.get('deviceId')
             slots = data.get('slots')
             printer = PrinterSettings.objects.all().first()
 
-            # Step 1: Ensure slots is a list
-            if isinstance(slots, str):
-                slots = [slots]  # Convert single string to list
-
-            # Step 2: Convert all elements in the list to integers
+            if slots is None:
+                slots = []
+            if isinstance(slots, (str, int)):
+                slots = [slots]
             slots = [int(slot) for slot in slots]
+            if deviceId not in (None, '', -1, '-1'):
+                deviceId = int(deviceId)
+            else:
+                deviceId = -1
 
             if not printer:
                 return JsonResponse({'error': 'Keine Drucker-Einstellungen gespeichert. Bitte zuerst unter Settings einen Drucker konfigurieren und speichern.'}, status=400)
 
-            # Regular Printing
-            if printer.IsDualLabel:
-
-                if isDemo:
-                    label = draw_dual_label([])
-
-                    response_data = {
-                        "label": f"{label}"
-                    }
-                    return JsonResponse(response_data)
-
-                if deviceId != -1:
-                    label_data = gather_label_data(deviceId, slots)
+            if isDemo:
+                if printer.IsDualLabel:
+                    label = draw_dual_label([], use_demo=True)
+                elif printer.LabelShape == "square":
+                    label = draw_square_label([], printer.CustomField1, use_demo=True)
                 else:
-                    label_data = gather_label_cell_data(slots)
-                label = draw_dual_label(label_data)
+                    label = draw_landscape_label([], printer.CustomField1, use_demo=True)
+                return JsonResponse({"label": f"{label}"})
 
-                response_data = {
-                    "label": f"{label}"
-                }
-                return JsonResponse(response_data)
-
+            if deviceId != -1:
+                label_data = gather_label_data(deviceId, slots)
             else:
+                label_data = gather_label_cell_data(slots)
 
-                if isDemo:
+            if not label_data:
+                return JsonResponse({
+                    'error': 'Keine Zelldaten für die gewählten Slots. Zelle zuerst testen oder speichern.'
+                }, status=400)
 
-                    if printer.LabelShape == "square":
-                        label = draw_square_label([], printer.CustomField1)
-                    else:
-                        label = draw_landscape_label([], printer.CustomField1)
+            if printer.IsDualLabel:
+                label = draw_dual_label(label_data)
+            elif printer.LabelShape == "square":
+                label = draw_square_label(label_data, printer.CustomField1)
+            else:
+                label = draw_landscape_label(label_data, printer.CustomField1)
 
-                    response_data = {
-                        "label": f"{label}"
-                    }
-                    return JsonResponse(response_data)
+            if not label:
+                return JsonResponse({'error': 'Etikett konnte nicht erzeugt werden.'}, status=400)
 
-                if deviceId != -1:
-                    label_data = gather_label_data(deviceId, slots)
-                else:
-                    label_data = gather_label_cell_data(slots)
-
-                if printer.LabelShape == "square":
-                    label = draw_square_label(label_data, printer.CustomField1)
-                else:
-                    label = draw_landscape_label(label_data, printer.CustomField1)
-
-                response_data = {
-                    "label": f"{label}"
-                }
-                return JsonResponse(response_data)
+            return JsonResponse({"label": f"{label}"})
 
         except json.JSONDecodeError:
             return JsonResponse({'error': 'Invalid JSON'}, status=400)

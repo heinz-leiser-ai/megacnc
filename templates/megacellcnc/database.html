@@ -200,7 +200,7 @@
                 <a href="#" class="text-secondary" data-bs-toggle="dropdown" id="columnSelector" title="Columns"><i class="fa-solid fa-table-columns fs-18"></i></a>
                 <ul class="dropdown-menu column-selector-menu" aria-labelledby="columnSelector" style="z-index: 1050;">
                     <li><label class="dropdown-item"><input type="checkbox" class="column-toggle" data-column="col-id" checked> ID</label></li>
-                    <li><label class="dropdown-item"><input type="checkbox" class="column-toggle" data-column="col-serial" checked> Serial No</label></li>
+                    <li><label class="dropdown-item"><input type="checkbox" class="column-toggle" data-column="col-serial"> Serial No</label></li>
                     <li><label class="dropdown-item"><input type="checkbox" class="column-toggle" data-column="col-uuid"> UUID</label></li>
                     <li><label class="dropdown-item"><input type="checkbox" class="column-toggle" data-column="col-available" checked> Available</label></li>
                     <li><label class="dropdown-item"><input type="checkbox" class="column-toggle" data-column="col-condition" checked> Condition</label></li>
@@ -399,7 +399,7 @@
                                         </div>
                                     </th>
                                     <th class="col-id">ID</th>
-                                    <th class="col-serial">Serial No</th>
+                                    <th class="col-serial" style="display:none;">Serial No</th>
                                     <th class="col-uuid" style="display:none;">UUID</th>
                                     <th class="col-available">Available</th>
                                     <th class="col-condition">Condition</th>
@@ -428,7 +428,7 @@
                                     </td>
 
                                     <td class="col-id">{{ cell.id }}</td>
-                                    <td class="col-serial">{{ cell.UUID|slice:"12:"|default:"-" }}</td>
+                                    <td class="col-serial" style="display:none;">{{ cell.UUID|slice:"12:"|default:"-" }}</td>
                                     <td class="col-uuid" style="display:none;">{{ cell.UUID }}</td>
                                     <td class="col-available"><div class="status-{{ cell.available|lower|add:'-cell' }}">{{ cell.available|capfirst }}</div></td>
                                     <td class="col-condition">
