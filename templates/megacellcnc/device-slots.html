@@ -283,7 +283,7 @@
                                     <td id="slot_{{ slot.slot_number }}_max_volt">{{ slot.max_volt|round2 }}</td>
                                     <td id="slot_{{ slot.slot_number }}_store_volt">{{ slot.store_volt|round2 }}</td>
                                     <td id="slot_{{ slot.slot_number }}_min_volt">{{ slot.min_volt|round2 }}</td>
-                                    <td id="slot_{{ slot.slot_number }}_cell_id">{{ slot.active_cell_uuid }}</td>
+                                    <td id="slot_{{ slot.slot_number }}_cell_id">{% if slot.active_cell %}{{ slot.active_cell.id }}{% endif %}</td>
 
                                     <td>
                                         <button type="button" class="btn btn-primary shadow btn-xs sharp me-1 expandBtn"

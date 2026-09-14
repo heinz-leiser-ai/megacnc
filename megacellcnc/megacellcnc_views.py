@@ -461,12 +461,18 @@ def update_battery_name(request):
 
 
 def _filter_cells_by_id(queryset, search_query):
-    """Prefix search on Cells.id. Returns (queryset, result_count_or_none)."""
+    """Find cells by database ID (same number as Device 'Cell Id')."""
     if not search_query:
         return queryset, None
+    query = search_query.strip()
+    if query.isdigit():
+        qs = queryset.filter(id=int(query))
+        return qs, qs.count()
     from django.db.models import CharField
     from django.db.models.functions import Cast
-    qs = queryset.annotate(id_str=Cast('id', CharField())).filter(id_str__startswith=search_query)
+    qs = queryset.annotate(_id_text=Cast('id', CharField(max_length=32))).filter(
+        _id_text__startswith=query
+    )
     return qs, qs.count()
 
 
@@ -550,28 +556,32 @@ def database(request):
         )
         selected_project_name = Projects.objects.get(id=project_id).Name
 
-    # Jahr-Filter (aus UUID extrahiert)
-    if year_filter:
-        # UUID Format: D{YYYYMMDD}-S{SerialNo}
-        # Filter nach Jahr im UUID: D2023
-        cells_queryset = cells_queryset.filter(UUID__startswith=f'D{year_filter}')
+    # ID-Suche (Zahl wie auf dem Device-Bildschirm): immer alle Zellen, ohne andere Filter
+    if search_query.isdigit():
+        cells_queryset = Cells.objects.select_related('project', 'battery').filter(
+            id=int(search_query)
+        ).order_by('id')
+        search_results = cells_queryset.count()
+    else:
+        # Jahr-Filter (aus UUID extrahiert)
+        if year_filter:
+            cells_queryset = cells_queryset.filter(UUID__startswith=f'D{year_filter}')
 
-    # Status-Filter (Available)
-    if status_filter:
-        cells_queryset = cells_queryset.filter(available__iexact=status_filter)
+        # Status-Filter (Available)
+        if status_filter:
+            cells_queryset = cells_queryset.filter(available__iexact=status_filter)
 
-    # Battery-Pack-Filter
-    if battery_filter == 'none':
-        cells_queryset = cells_queryset.filter(battery__isnull=True)
-    elif battery_filter.isdigit():
-        bid = int(battery_filter)
-        if Batteries.objects.filter(pk=bid).exists():
-            cells_queryset = cells_queryset.filter(battery_id=bid)
-        else:
-            battery_filter = ''
+        # Battery-Pack-Filter
+        if battery_filter == 'none':
+            cells_queryset = cells_queryset.filter(battery__isnull=True)
+        elif battery_filter.isdigit():
+            bid = int(battery_filter)
+            if Batteries.objects.filter(pk=bid).exists():
+                cells_queryset = cells_queryset.filter(battery_id=bid)
+            else:
+                battery_filter = ''
 
-    # Suche nach ID-Nr. (Präfix, ab 1 Zeichen)
-    cells_queryset, search_results = _filter_cells_by_id(cells_queryset, search_query)
+        cells_queryset, search_results = _filter_cells_by_id(cells_queryset, search_query)
     
     # Extrahiere alle verfügbaren Jahre aus UUIDs
     # Verwende SQL für Performance statt Python-Loop
@@ -637,34 +647,40 @@ def database_search_ajax(request):
     page = request.GET.get('page', 1)
     per_page = int(request.GET.get('per_page', 100))
 
-    # Base queryset
-    if project_id == 'all' or project_id is None:
-        cells_queryset = Cells.objects.select_related('project', 'battery').all().order_by('id')
+    # ID-Suche: immer alle Zellen, ohne Projekt/Jahr/Status-Filter
+    if search_query.isdigit():
+        cells_queryset = Cells.objects.select_related('project', 'battery').filter(
+            id=int(search_query)
+        ).order_by('id')
+        search_results = cells_queryset.count()
     else:
-        cells_queryset = (
-            Cells.objects.select_related('project', 'battery')
-            .filter(project__id=project_id)
-            .order_by('id')
-        )
+        # Base queryset
+        if project_id == 'all' or project_id is None:
+            cells_queryset = Cells.objects.select_related('project', 'battery').all().order_by('id')
+        else:
+            cells_queryset = (
+                Cells.objects.select_related('project', 'battery')
+                .filter(project__id=project_id)
+                .order_by('id')
+            )
 
-    # Jahr-Filter
-    if year_filter:
-        cells_queryset = cells_queryset.filter(UUID__startswith=f'D{year_filter}')
-    
-    # Status-Filter
-    if status_filter:
-        cells_queryset = cells_queryset.filter(available__iexact=status_filter)
+        # Jahr-Filter
+        if year_filter:
+            cells_queryset = cells_queryset.filter(UUID__startswith=f'D{year_filter}')
 
-    # Battery-Pack-Filter
-    if battery_filter == 'none':
-        cells_queryset = cells_queryset.filter(battery__isnull=True)
-    elif battery_filter.isdigit():
-        bid = int(battery_filter)
-        if Batteries.objects.filter(pk=bid).exists():
-            cells_queryset = cells_queryset.filter(battery_id=bid)
-    
-    # Suche nach ID-Nr. (Präfix, ab 1 Zeichen)
-    cells_queryset, search_results = _filter_cells_by_id(cells_queryset, search_query)
+        # Status-Filter
+        if status_filter:
+            cells_queryset = cells_queryset.filter(available__iexact=status_filter)
+
+        # Battery-Pack-Filter
+        if battery_filter == 'none':
+            cells_queryset = cells_queryset.filter(battery__isnull=True)
+        elif battery_filter.isdigit():
+            bid = int(battery_filter)
+            if Batteries.objects.filter(pk=bid).exists():
+                cells_queryset = cells_queryset.filter(battery_id=bid)
+
+        cells_queryset, search_results = _filter_cells_by_id(cells_queryset, search_query)
     
     # Pagination mit dynamischer Seitengröße
     paginator = Paginator(cells_queryset, per_page)
