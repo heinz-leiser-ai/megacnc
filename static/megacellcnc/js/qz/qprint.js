@@ -1894,17 +1894,24 @@ async function printLabels(slots, deviceId) {
             body: JSON.stringify({ isDemo: 0, deviceId, slots: slotList })
         });
         const data = await response.json();
-        if (!response.ok || !data.label) {
+        const images = Array.isArray(data.labels) && data.labels.length
+            ? data.labels
+            : (data.label ? [data.label] : []);
+        if (!response.ok || !images.length) {
             toastr.error(data.error || 'Keine Zelldaten zum Drucken', 'Fehler');
             return;
         }
 
         var config = getUpdatedConfig();
-        var printData = [
-            { type: 'pixel', format: 'image', flavor: 'base64', data: data.label }
-        ];
-        await qz.print(config, printData);
-        toastr.success(data.message || 'Etikett gedruckt', 'Success');
+        for (let i = 0; i < images.length; i++) {
+            await qz.print(config, [
+                { type: 'pixel', format: 'image', flavor: 'base64', data: images[i] }
+            ]);
+            if (i < images.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 800));
+            }
+        }
+        toastr.success(data.message || `${images.length} Etikett(en) gedruckt`, 'Success');
     } catch (error) {
         console.error('Error printing label:', error);
         displayError(error);

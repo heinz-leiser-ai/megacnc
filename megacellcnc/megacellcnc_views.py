@@ -9,7 +9,7 @@ import shutil
 from django.urls import reverse
 from .functions import scan_for_devices, add_new_cell, draw_dual_label, gather_label_data, draw_square_label, \
     draw_landscape_label, generate_uuid_for_cell, gather_label_cell_data, generate_battery_uuid, \
-    normalize_mccpro_chemistry_payload, build_mccpro_edit_device_data
+    normalize_mccpro_chemistry_payload, build_mccpro_edit_device_data, render_print_labels
 from datetime import timedelta
 import json
 import msgpack
@@ -1820,7 +1820,7 @@ def print_label(request):
                     label = draw_square_label([], printer.CustomField1, use_demo=True)
                 else:
                     label = draw_landscape_label([], printer.CustomField1, use_demo=True)
-                return JsonResponse({"label": f"{label}"})
+                return JsonResponse({"label": f"{label}", "labels": [label] if label else []})
 
             if deviceId != -1:
                 label_data = gather_label_data(deviceId, slots)
@@ -1832,17 +1832,11 @@ def print_label(request):
                     'error': 'Keine Zelldaten für die gewählten Slots. Zelle zuerst testen oder speichern.'
                 }, status=400)
 
-            if printer.IsDualLabel:
-                label = draw_dual_label(label_data)
-            elif printer.LabelShape == "square":
-                label = draw_square_label(label_data, printer.CustomField1)
-            else:
-                label = draw_landscape_label(label_data, printer.CustomField1)
-
-            if not label:
+            labels = render_print_labels(label_data, printer)
+            if not labels:
                 return JsonResponse({'error': 'Etikett konnte nicht erzeugt werden.'}, status=400)
 
-            return JsonResponse({"label": f"{label}"})
+            return JsonResponse({"label": labels[0], "labels": labels})
 
         except json.JSONDecodeError:
             return JsonResponse({'error': 'Invalid JSON'}, status=400)

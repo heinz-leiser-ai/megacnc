@@ -469,15 +469,28 @@ def format_cap(capacity):
     return cap, capUnit
 
 
+def _serial_from_uuid(uuid_value):
+    match = re.search(r'-S(\d+)', str(uuid_value or ""))
+    if match:
+        return match.group(1).zfill(6)
+    return ""
+
+
 def _label_cell_id(label_item):
-    return str(label_item.get("id") or label_item.get("serial") or "")
+    serial = _serial_from_uuid(label_item.get("uuid"))
+    if serial:
+        return serial
+    raw = label_item.get("serial") or label_item.get("id") or ""
+    text = str(raw)
+    return text.zfill(6) if text.isdigit() else text
 
 
 def _label_dict_from_cell(acell, ip, slot_number):
     formated_date = acell.insertion_date.strftime('%Y-%m-%d')
+    serial = _serial_from_uuid(acell.UUID) or str(acell.id).zfill(6)
     return {
         "id": acell.id,
-        "serial": str(acell.id),
+        "serial": serial,
         "uuid": acell.UUID,
         "cap": acell.capacity,
         "esr": acell.esr,
@@ -489,6 +502,45 @@ def _label_dict_from_cell(acell, ip, slot_number):
         "slot": slot_number,
         "date": formated_date,
     }
+
+
+def _new_blank_label(template_path, fallback_size):
+    size = fallback_size
+    try:
+        with Image.open(template_path) as src:
+            size = src.size
+    except Exception:
+        pass
+    return Image.new("RGB", size, (255, 255, 255))
+
+
+def _save_label_preview(buffered, preview_location):
+    try:
+        buffered.seek(0)
+        with open(preview_location, "wb") as f:
+            f.write(buffered.getvalue())
+    except Exception:
+        logger.warning("label preview not written: %s", preview_location)
+
+
+def render_print_labels(label_data, printer):
+    labels = []
+    if printer.IsDualLabel:
+        for i in range(0, len(label_data), 2):
+            img = draw_dual_label(label_data[i:i + 2])
+            if img:
+                labels.append(img)
+    elif printer.LabelShape == "square":
+        for item in label_data:
+            img = draw_square_label([item], printer.CustomField1)
+            if img:
+                labels.append(img)
+    else:
+        for item in label_data:
+            img = draw_landscape_label([item], printer.CustomField1)
+            if img:
+                labels.append(img)
+    return labels
 
 
 def draw_dual_label(label_data, use_demo=False):
@@ -507,7 +559,8 @@ def draw_dual_label(label_data, use_demo=False):
     header_font_location = os.path.join(templates_folder, 'fonts', 'OpenSans-Bold.ttf')
     left_values_font_loc = os.path.join(templates_folder, 'fonts', 'OpenSans-Regular.ttf')
 
-    label = Image.open(dymo_label_location)
+    label_data = label_data[:2]
+    label = _new_blank_label(dymo_label_location, (500, 500))
     header_font = ImageFont.truetype(header_font_location, 62)
     left_values_font = ImageFont.truetype(left_values_font_loc, 42)
     brand_font2 = ImageFont.truetype(left_values_font_loc, 32)
@@ -543,10 +596,7 @@ def draw_dual_label(label_data, use_demo=False):
     label.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
 
-    buffered.seek(0)
-
-    with open(preview_location, 'wb') as f:
-        f.write(buffered.getvalue())
+    _save_label_preview(buffered, preview_location)
 
     return img_str
 
@@ -565,7 +615,7 @@ def draw_square_label(label_data, custom_field1, use_demo=False):
     header_font_location = os.path.join(templates_folder, 'fonts', 'OpenSans-Bold.ttf')
     left_values_font_loc = os.path.join(templates_folder, 'fonts', 'OpenSans-Regular.ttf')
 
-    label = Image.open(dymo_label_location)
+    label = _new_blank_label(dymo_label_location, (500, 500))
     header_font = ImageFont.truetype(header_font_location, 65)
     left_values_font = ImageFont.truetype(left_values_font_loc, 50)
     brand_font = ImageFont.truetype(left_values_font_loc, 42)
@@ -605,10 +655,7 @@ def draw_square_label(label_data, custom_field1, use_demo=False):
     label.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
 
-    buffered.seek(0)
-
-    with open(preview_location, 'wb') as f:
-        f.write(buffered.getvalue())
+    _save_label_preview(buffered, preview_location)
 
     return img_str
 
@@ -628,7 +675,7 @@ def draw_landscape_label(label_data, custom_field1, use_demo=False):
     header_font_location = os.path.join(templates_folder, 'fonts', 'OpenSans-Bold.ttf')
     left_values_font_loc = os.path.join(templates_folder, 'fonts', 'OpenSans-Regular.ttf')
 
-    label = Image.open(dymo_label_location)
+    label = _new_blank_label(dymo_label_location, (450, 302))
     header_font = ImageFont.truetype(header_font_location, 62)
     left_values_font = ImageFont.truetype(left_values_font_loc, 46)
     brand_font = ImageFont.truetype(left_values_font_loc, 42)
@@ -659,10 +706,7 @@ def draw_landscape_label(label_data, custom_field1, use_demo=False):
     label.save(buffered, format="JPEG")
     img_str = base64.b64encode(buffered.getvalue()).decode()
 
-    buffered.seek(0)
-
-    with open(preview_location, 'wb') as f:
-        f.write(buffered.getvalue())
+    _save_label_preview(buffered, preview_location)
 
     return img_str
 

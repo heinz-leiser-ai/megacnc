@@ -319,6 +319,7 @@ let dataSet = [
         ],
 		searching: false,
 		select: false,   
+        paging: false,
         pageLength:160,			
         lengthChange:false ,
 		language: {

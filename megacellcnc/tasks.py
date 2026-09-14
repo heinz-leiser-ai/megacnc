@@ -38,15 +38,28 @@ def _cell_num(cell, key, default=0):
         return default
 
 
+def _as_slot_count(value):
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count > 0 else None
+
+
 def _slot_count_from_identity(device_type):
     if not isinstance(device_type, dict):
         return None
     cht = device_type.get("ChT")
+    cec = _as_slot_count(device_type.get("CeC"))
+    byc = _as_slot_count(device_type.get("ByC"))
     if cht in ("MCCPro", "MCCReg"):
-        return device_type.get("CeC") or device_type.get("ByC")
+        return cec or byc
     if cht == "MCC" or "McC" in device_type:
-        return device_type.get("ByC") or device_type.get("CeC")
-    return device_type.get("CeC") or device_type.get("ByC")
+        # MCC-alt: ByC is often "2 banks", not 2 slots
+        if (byc or 0) <= 2 and (cec or 0) <= 2:
+            return 16
+        return cec or byc or 16
+    return cec or byc
 
 
 def _is_test_finished(slot):
@@ -172,13 +185,18 @@ def update_slot_data(device_model, tester, device_slot_count):
 
     use_gid = device_model.type == "MCCPro" and "GiD" in cells_list[0]
     group_key = "GiD" if use_gid else "CiD"
-    api_ids = []
+    normalized = []
     for cell in cells_list:
-        if group_key in cell and cell[group_key] is not None:
-            try:
-                api_ids.append(int(cell[group_key]))
-            except (TypeError, ValueError):
-                pass
+        if not isinstance(cell, dict) or cell.get(group_key) is None:
+            continue
+        try:
+            row = dict(cell)
+            row[group_key] = int(row[group_key])
+            normalized.append(row)
+        except (TypeError, ValueError):
+            continue
+    cells_list = normalized
+    api_ids = [cell[group_key] for cell in cells_list]
     if not api_ids:
         logger.warning("update_slot_data: missing %s in cells from %s", group_key, device_model.ip)
         return

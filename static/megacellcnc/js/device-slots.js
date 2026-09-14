@@ -163,20 +163,9 @@ async function sendAction(action) {
 
 
     if (action === "print") {
-        const slots = slots_number.map(String);
-        let doubleLabel = parseInt(includedValue($("#doubleLabel")));
-
-        if (doubleLabel === 1) {
-            for (let i = 0; i < slots.length; i += 2) {
-                await printLabels(slots.slice(i, i + 2), deviceId);
-                await sleep(1000);
-            }
-        } else {
-            for (let i = 0; i < slots.length; i++) {
-                await printLabels([slots[i]], deviceId);
-                await sleep(1000);
-            }
-        }
+        const slots = slots_number.map(Number);
+        await printLabels(slots, deviceId);
+        return;
     }
     else {
 

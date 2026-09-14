@@ -582,44 +582,8 @@ async function sendAction(action) {
 
 
     if (action === "print") {
-
-        let doubleLabel = parseInt(includedValue($("#doubleLabel")));
-
-        if (doubleLabel === 1) {
-            let batch_size = 2;
-            console.log("this is double label");
-            console.log(cell_ids);
-            if (cell_ids.length > 1) {
-                for (let i = 0; i <= cell_ids.length - batch_size; i += batch_size) {
-                    let batch = cell_ids.slice(i, i + batch_size);
-                    printLabels(batch, -1);
-                    await sleep(1000);
-                }
-
-                // Check if there's an uneven batch at the end
-                if (cell_ids.length % batch_size !== 0) {
-                    // Get the last slot
-                    let lastBatch = cell_ids.slice(-1);
-
-                    // Print the last slot
-                    printLabels(lastBatch, -1);
-                }
-            }
-
-
-
-
-
-        } else {
-            for (let i = 0; i < cell_ids.length; i++) {
-                printLabels([cell_ids[i]], -1);
-                await sleep(1000);
-            }
-
-
-        }
-
-
+        await printLabels(cell_ids.map(Number), -1);
+        return;
     }
 
 

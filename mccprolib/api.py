@@ -15,11 +15,21 @@ class MegacellCharger:
 
     def get_cells_data(self):
         cells = []
-        for start, end in ((1, 8), (9, 16)):
+        seen = set()
+        for start, end in ((1, 8), (9, 16), (0, 7), (8, 15), (0, 15)):
             try:
                 result = self.get_data({"start": start, "end": end}, "api/get_cells_info")
-                if isinstance(result, dict) and isinstance(result.get("cells"), list):
-                    cells.extend(result["cells"])
+                batch = result.get("cells") if isinstance(result, dict) else None
+                if not isinstance(batch, list):
+                    continue
+                for cell in batch:
+                    cid = cell.get("CiD")
+                    gid = cell.get("GiD")
+                    key = ("c", cid) if cid is not None else (("g", gid) if gid is not None else None)
+                    if key is None or key in seen:
+                        continue
+                    seen.add(key)
+                    cells.append(cell)
             except Exception:
                 pass
         return {"cells": cells}
