@@ -97,6 +97,35 @@ docker image prune -f 2>/dev/null || true
 docker builder prune -f 2>/dev/null || true
 echo -e "${GREEN}✓ Build-Cache aufgeräumt${NC}"
 
+# ── Step 5: developer → main (Tito: git pull origin main) ──
+echo ""
+echo -e "${YELLOW}Step 5: Branch main aktualisieren...${NC}"
+GIT_REMOTE="${DEPLOY_GIT_REMOTE:-origin}"
+MAIN_BRANCH="main"
+SOURCE_BRANCH="$(git branch --show-current)"
+
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo -e "${RED}✗ Ungespeicherte Änderungen — Merge nach ${MAIN_BRANCH} übersprungen.${NC}"
+    echo -e "${YELLOW}  Erst committen, dann erneut deployen oder manuell mergen.${NC}"
+elif [[ -z "$SOURCE_BRANCH" ]]; then
+    echo -e "${RED}✗ Detached HEAD — Merge nach ${MAIN_BRANCH} übersprungen.${NC}"
+else
+    set +e
+    git fetch "$GIT_REMOTE" \
+        && git checkout "$MAIN_BRANCH" \
+        && git pull --ff-only "$GIT_REMOTE" "$MAIN_BRANCH" \
+        && { [[ "$SOURCE_BRANCH" == "$MAIN_BRANCH" ]] || git merge "$SOURCE_BRANCH" --no-edit; } \
+        && git push "$GIT_REMOTE" "$MAIN_BRANCH"
+    MERGE_STATUS=$?
+    git checkout "$SOURCE_BRANCH" >/dev/null 2>&1
+    set -e
+    if [[ $MERGE_STATUS -ne 0 ]]; then
+        echo -e "${RED}✗ Merge/Push nach ${MAIN_BRANCH} fehlgeschlagen. Image ist trotzdem auf ghcr.io.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ ${MAIN_BRANCH} enthält jetzt ${SOURCE_BRANCH} und ist gepusht${NC}"
+fi
+
 # Summary
 echo ""
 echo -e "${GREEN}=== Deployment Complete ===${NC}"
@@ -105,5 +134,5 @@ echo "Images available at:"
 echo "  ${FULL_IMAGE}:${VERSION}"
 echo "  ${FULL_IMAGE}:latest"
 echo ""
-echo "To pull on production server:"
-echo "  docker pull ${FULL_IMAGE}:latest"
+echo "Tito: Update-Skript wie gewohnt (holt main + Image)."
+echo "Manuell: docker pull ${FULL_IMAGE}:latest"
