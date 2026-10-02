@@ -23,8 +23,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Version from argument or generate from date
-VERSION="${1:-$(date +%Y%m%d-%H%M%S)}"
+# Version: Docker-Tag ohne Leerzeichen. Freitext -> Zeitstempel.
+if [[ -n "${1:-}" && "$1" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    VERSION="$1"
+else
+    if [[ -n "${1:-}" ]]; then
+        echo -e "${YELLOW}Hinweis: \"$1\" ist kein gültiger Image-Tag. Nutze Zeitstempel.${NC}"
+    fi
+    VERSION="$(date +%Y%m%d-%H%M%S)"
+fi
 
 echo -e "${GREEN}=== Deploy to GitHub Container Registry ===${NC}"
 echo -e "Image: ${FULL_IMAGE}"
