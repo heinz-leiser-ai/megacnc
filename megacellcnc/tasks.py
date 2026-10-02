@@ -66,10 +66,8 @@ def _is_test_finished(slot):
     if slot.state in COMPLETE_STATES:
         return True
     current = abs(slot.current or 0)
-    capacity = slot.capacity or 0
     if (
         current < 50
-        and capacity > 0
         and slot.state not in ACTIVE_TEST_STATES
         and slot.state != "Not Inserted"
     ):
@@ -120,7 +118,7 @@ def update_cell_data(device, slot):
             )
             new_data.save()
 
-        if cell.available != "Yes" and _is_test_finished(slot):
+        if _is_test_finished(slot) and (cell.available != "Yes" or not cell.removal_date):
             mark_cell_available(cell, removed=False)
 
 
