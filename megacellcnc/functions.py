@@ -7,6 +7,9 @@ from mccprolib.api import MegacellCharger
 from .models import Projects, Cells, Device, Batteries
 import re
 from datetime import datetime
+from django.db import transaction
+from django.db.models import IntegerField, Max
+from django.db.models.functions import Cast, Right
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from PIL import Image, ImageFont, ImageDraw
@@ -139,27 +142,35 @@ def scan_for_devices(from_ip, to_ip, manual_ip):
     return devices_list
 
 
+def _global_max_serial():
+    max_counter = Projects.objects.aggregate(m=Max("LastCellNumber"))["m"] or 0
+    max_uuid = 0
+    try:
+        max_uuid = (
+            Cells.objects.filter(UUID__regex=r"-S\d+$")
+            .annotate(serial_n=Cast(Right("UUID", 6), IntegerField()))
+            .aggregate(m=Max("serial_n"))["m"]
+        ) or 0
+    except Exception:
+        for uuid in Cells.objects.order_by("-id").values_list("UUID", flat=True)[:200]:
+            match = re.search(r"-S(\d+)", uuid or "")
+            if match:
+                max_uuid = max(max_uuid, int(match.group(1)))
+    return max(int(max_counter), int(max_uuid))
+
+
 def generate_uuid_for_cell(project_id):
-    # Query the last cell for the given project ID, ordered by ID to get the most recent one
-    last_cell = Cells.objects.filter(project_id=project_id).order_by('-id').first()
-
-    if last_cell:
-        # Extract the serial number from the last cell's UUID
-        match = re.search(r'-S(\d+)', last_cell.UUID)
-        if match:
-            serial_number = int(match.group(1)) + 1  # Increment the serial number
-        else:
-            # If for some reason the UUID format is wrong, start a new serial number
-            serial_number = 1
-    else:
-        # If there are no cells for the project, start with serial number 1
-        serial_number = 1
-
-    # Generate a new UUID using today's date and the new serial number
-    date_prefix = datetime.now().strftime('D%Y%m%d')
-    new_uuid = f"{date_prefix}-S{serial_number:06d}"  # Assuming a fixed capacity part for simplicity
-
-    return new_uuid
+    """Next global serial (MCC-alt and MCC-Pro share one range)."""
+    date_prefix = datetime.now().strftime("D%Y%m%d")
+    with transaction.atomic():
+        list(Projects.objects.select_for_update().order_by("pk"))
+        project = Projects.objects.get(id=project_id)
+        serial_number = _global_max_serial() + 1
+        while Cells.objects.filter(UUID__endswith=f"-S{serial_number:06d}").exists():
+            serial_number += 1
+        project.LastCellNumber = serial_number
+        project.save(update_fields=["LastCellNumber"])
+        return f"{date_prefix}-S{serial_number:06d}"
 
 
 def add_new_cell(device, slot):

@@ -9,7 +9,8 @@ import shutil
 from django.urls import reverse
 from .functions import scan_for_devices, add_new_cell, draw_dual_label, gather_label_data, draw_square_label, \
     draw_landscape_label, generate_uuid_for_cell, gather_label_cell_data, generate_battery_uuid, \
-    normalize_mccpro_chemistry_payload, build_mccpro_edit_device_data, render_print_labels
+    normalize_mccpro_chemistry_payload, build_mccpro_edit_device_data, render_print_labels, \
+    _serial_from_uuid
 from datetime import timedelta
 import json
 import msgpack
@@ -920,7 +921,7 @@ def get_updated_slots(request, device_id):
 
         if slot.active_cell:
             slot_info.update({
-                'active_cell_uuid': slot.active_cell.id,
+                'active_cell_uuid': _serial_from_uuid(slot.active_cell.UUID) or slot.active_cell.id,
                 'active_cell_type': slot.active_cell.cell_type,
             })
 
@@ -958,7 +959,7 @@ def get_project_slots(request, project_id):
 
             if slot.active_cell:
                 slot_info.update({
-                    'active_cell_uuid': slot.active_cell.id,
+                    'active_cell_uuid': _serial_from_uuid(slot.active_cell.UUID) or slot.active_cell.id,
                     'active_cell_type': slot.active_cell.cell_type,
                 })
 
