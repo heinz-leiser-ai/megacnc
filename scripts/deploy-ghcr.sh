@@ -2,7 +2,14 @@
 
 # Deploy script for GitHub Container Registry (ghcr.io)
 # Usage: ./scripts/deploy-ghcr.sh [version]
-# Example: ./scripts/deploy-ghcr.sh v1.0.0
+# Ohne Argument: APP_VERSION Patch +1 (1.4.13 → 1.4.14)
+# Example: ./scripts/deploy-ghcr.sh 1.5.0
+#
+# Reihenfolge:
+#   1. Version eintragen
+#   2. Commit + Push
+#   3. Merge nach main
+#   4. Image bauen + pushen
 
 set -e
 
@@ -23,19 +30,45 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Version: Docker-Tag ohne Leerzeichen. Freitext -> Zeitstempel.
-if [[ -n "${1:-}" && "$1" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    VERSION="$1"
+SETTINGS_FILE="$REPO_ROOT/dashboard/settings.py"
+GIT_REMOTE="${DEPLOY_GIT_REMOTE:-origin}"
+MAIN_BRANCH="main"
+
+read_app_version() {
+    grep -oE 'APP_VERSION[[:space:]]*=[[:space:]]*"[^"]+"' "$SETTINGS_FILE" | head -1 | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+bump_patch() {
+    local current="$1"
+    local major minor patch
+    IFS='.' read -r major minor patch <<< "$current"
+    if [[ -z "$major" || -z "$minor" || -z "$patch" ]]; then
+        echo "1.0.0"
+        return
+    fi
+    echo "${major}.${minor}.$((patch + 1))"
+}
+
+CURRENT_APP_VERSION="$(read_app_version)"
+if [[ -z "$CURRENT_APP_VERSION" ]]; then
+    echo -e "${RED}Error: APP_VERSION in dashboard/settings.py nicht gefunden${NC}"
+    exit 1
+fi
+
+# App-Version: $1 als 1.4.14 oder v1.4.14, sonst Patch +1
+if [[ -n "${1:-}" && "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    APP_VERSION="${1#v}"
 else
     if [[ -n "${1:-}" ]]; then
-        echo -e "${YELLOW}Hinweis: \"$1\" ist kein gültiger Image-Tag. Nutze Zeitstempel.${NC}"
+        echo -e "${YELLOW}Hinweis: \"$1\" ist keine Versionsnummer (z.B. 1.4.14). Zähle Patch hoch.${NC}"
     fi
-    VERSION="$(date +%Y%m%d-%H%M%S)"
+    APP_VERSION="$(bump_patch "$CURRENT_APP_VERSION")"
 fi
+VERSION="$APP_VERSION"
 
 echo -e "${GREEN}=== Deploy to GitHub Container Registry ===${NC}"
 echo -e "Image: ${FULL_IMAGE}"
-echo -e "Version: ${VERSION}"
+echo -e "App-Version: ${CURRENT_APP_VERSION} → ${APP_VERSION}"
 echo ""
 
 # Check for GHCR_TOKEN environment variable
@@ -54,13 +87,24 @@ if [ -z "$GHCR_TOKEN" ]; then
     exit 1
 fi
 
+SOURCE_BRANCH="$(git branch --show-current)"
+if [[ -z "$SOURCE_BRANCH" ]]; then
+    echo -e "${RED}✗ Detached HEAD — erst auf einen Branch wechseln.${NC}"
+    exit 1
+fi
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo -e "${RED}✗ Ungespeicherte Änderungen. Erst alles committen, dann erneut deployen.${NC}"
+    git status --short
+    exit 1
+fi
+
 # Optional: Create DB backup before deploy
 read -p "Create database backup before deploy? (y/N): " CREATE_BACKUP
 if [[ "$CREATE_BACKUP" =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}Creating database backup...${NC}"
     mkdir -p backups
     BACKUP_FILE="backups/db_backup_predeploy_$(date +%Y%m%d_%H%M%S).sql"
-    
+
     if docker-compose exec -T db pg_dump -U postgres mcccnc > "$BACKUP_FILE" 2>/dev/null; then
         gzip "$BACKUP_FILE"
         echo -e "${GREEN}✓ Backup created: ${BACKUP_FILE}.gz${NC}"
@@ -69,28 +113,56 @@ if [[ "$CREATE_BACKUP" =~ ^[Yy]$ ]]; then
     fi
 fi
 
-# Login to ghcr.io
-echo -e "${YELLOW}Step 1: Logging in to ghcr.io...${NC}"
+# ── Step 1: Version eintragen ──
+echo ""
+echo -e "${YELLOW}Step 1: App-Version eintragen (${CURRENT_APP_VERSION} → ${APP_VERSION})...${NC}"
+sed -i "s/^APP_VERSION = \".*\"/APP_VERSION = \"${APP_VERSION}\"/" "$SETTINGS_FILE"
+echo -e "${GREEN}✓ settings.py: APP_VERSION = \"${APP_VERSION}\"${NC}"
+
+# ── Step 2: Commit + Push ──
+echo ""
+echo -e "${YELLOW}Step 2: Commit + Push...${NC}"
+if git diff --quiet -- "$SETTINGS_FILE"; then
+    echo -e "${GREEN}✓ APP_VERSION war schon ${APP_VERSION}${NC}"
+else
+    git add "$SETTINGS_FILE"
+    git commit -m "Bump App-Version auf ${APP_VERSION}"
+    git push "$GIT_REMOTE" "$SOURCE_BRANCH"
+    echo -e "${GREEN}✓ ${SOURCE_BRANCH} gepusht${NC}"
+fi
+
+# ── Step 3: Merge nach main ──
+echo ""
+echo -e "${YELLOW}Step 3: Branch ${MAIN_BRANCH} aktualisieren...${NC}"
+git fetch "$GIT_REMOTE"
+git checkout "$MAIN_BRANCH"
+git pull --ff-only "$GIT_REMOTE" "$MAIN_BRANCH"
+if [[ "$SOURCE_BRANCH" != "$MAIN_BRANCH" ]]; then
+    git merge "$SOURCE_BRANCH" --no-edit
+fi
+git push "$GIT_REMOTE" "$MAIN_BRANCH"
+git checkout "$SOURCE_BRANCH"
+echo -e "${GREEN}✓ ${MAIN_BRANCH} enthält ${SOURCE_BRANCH} und ist gepusht${NC}"
+
+# ── Step 4: Image bauen ──
+echo ""
+echo -e "${YELLOW}Step 4: Login ghcr.io...${NC}"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$OWNER" --password-stdin
 echo -e "${GREEN}✓ Login successful${NC}"
 
-# Build image
 echo ""
-echo -e "${YELLOW}Step 2: Building Docker image...${NC}"
+echo -e "${YELLOW}Step 5: Docker-Image bauen...${NC}"
 docker build -t "${FULL_IMAGE}:${VERSION}" -t "${FULL_IMAGE}:latest" .
 echo -e "${GREEN}✓ Image built${NC}"
 
-# Push images
 echo ""
-echo -e "${YELLOW}Step 3: Pushing images to ghcr.io...${NC}"
+echo -e "${YELLOW}Step 6: Images nach ghcr.io pushen...${NC}"
 docker push "${FULL_IMAGE}:${VERSION}"
 docker push "${FULL_IMAGE}:latest"
 echo -e "${GREEN}✓ Images pushed${NC}"
 
-# Cleanup: alte Images aufräumen, nur letzte 2 Versionen behalten
 echo ""
-echo -e "${YELLOW}Step 4: Alte Images aufräumen...${NC}"
-
+echo -e "${YELLOW}Step 7: Alte Images aufräumen...${NC}"
 OLD_IMAGES=$(docker images "${FULL_IMAGE}" --format "{{.ID}} {{.Tag}}" | grep -v "latest" | tail -n +3 | awk '{print $1}')
 if [ -n "$OLD_IMAGES" ]; then
     echo "$OLD_IMAGES" | xargs docker rmi -f 2>/dev/null || true
@@ -98,48 +170,19 @@ if [ -n "$OLD_IMAGES" ]; then
 else
     echo -e "${GREEN}✓ Keine alten Images zum Aufräumen${NC}"
 fi
-
-# Dangling Images und Build-Cache entfernen
 docker image prune -f 2>/dev/null || true
 docker builder prune -f 2>/dev/null || true
 echo -e "${GREEN}✓ Build-Cache aufgeräumt${NC}"
-
-# ── Step 5: developer → main (Tito: git pull origin main) ──
-echo ""
-echo -e "${YELLOW}Step 5: Branch main aktualisieren...${NC}"
-GIT_REMOTE="${DEPLOY_GIT_REMOTE:-origin}"
-MAIN_BRANCH="main"
-SOURCE_BRANCH="$(git branch --show-current)"
-
-if [[ -n "$(git status --porcelain)" ]]; then
-    echo -e "${RED}✗ Ungespeicherte Änderungen — Merge nach ${MAIN_BRANCH} übersprungen.${NC}"
-    echo -e "${YELLOW}  Erst committen, dann erneut deployen oder manuell mergen.${NC}"
-elif [[ -z "$SOURCE_BRANCH" ]]; then
-    echo -e "${RED}✗ Detached HEAD — Merge nach ${MAIN_BRANCH} übersprungen.${NC}"
-else
-    set +e
-    git fetch "$GIT_REMOTE" \
-        && git checkout "$MAIN_BRANCH" \
-        && git pull --ff-only "$GIT_REMOTE" "$MAIN_BRANCH" \
-        && { [[ "$SOURCE_BRANCH" == "$MAIN_BRANCH" ]] || git merge "$SOURCE_BRANCH" --no-edit; } \
-        && git push "$GIT_REMOTE" "$MAIN_BRANCH"
-    MERGE_STATUS=$?
-    git checkout "$SOURCE_BRANCH" >/dev/null 2>&1
-    set -e
-    if [[ $MERGE_STATUS -ne 0 ]]; then
-        echo -e "${RED}✗ Merge/Push nach ${MAIN_BRANCH} fehlgeschlagen. Image ist trotzdem auf ghcr.io.${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}✓ ${MAIN_BRANCH} enthält jetzt ${SOURCE_BRANCH} und ist gepusht${NC}"
-fi
 
 # Summary
 echo ""
 echo -e "${GREEN}=== Deployment Complete ===${NC}"
 echo ""
+echo -e "${GREEN}Neue Version: ${APP_VERSION}${NC}"
+echo ""
 echo "Images available at:"
 echo "  ${FULL_IMAGE}:${VERSION}"
 echo "  ${FULL_IMAGE}:latest"
 echo ""
-echo "Tito: Update-Skript wie gewohnt (holt main + Image)."
+echo "Tito kann jetzt update.sh ausführen (holt main + Image)."
 echo "Manuell: docker pull ${FULL_IMAGE}:latest"
