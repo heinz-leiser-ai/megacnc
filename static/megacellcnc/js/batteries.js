@@ -36,24 +36,17 @@ function fetchCells(projectId) {
     });
 }
 
-// Extract Cell-ID from UUID (fallback if no DB-ID)
 function extractCellId(uuid) {
     const match = (uuid || '').match(/-S(\d+)/);
-    return match ? match[1] : (uuid || '');
+    return match ? match[1].padStart(6, '0') : (uuid || '');
 }
 
 function cellDisplayId(cell) {
-    if (cell && cell.id != null && String(cell.id).indexOf('-S') === -1) {
-        return String(cell.id);
-    }
-    return extractCellId(cell && (cell.uuid || cell.id) || '');
+    return extractCellId(cell && (cell.uuid || cell.UUID) || '');
 }
 
 function elementDisplayId(el) {
-    if (el && el.dataset && el.dataset.cellId) {
-        return el.dataset.cellId;
-    }
-    return extractCellId(el && el.dataset ? el.dataset.itemId : '');
+    return extractCellId(el && el.dataset ? (el.dataset.itemId || el.dataset.cellId) : '');
 }
 
 function updateCellsList(cells) {
@@ -2657,7 +2650,7 @@ function restoreFromCheckpoint(checkpoint) {
                 const cell = document.createElement('li');
                 cell.className = 'list-group-item';
                 cell.dataset.itemId = cellData.itemId || cellData.id;
-                cell.dataset.cellId = cellData.cellId || cellDisplayId({ id: cellData.cellId, uuid: cell.dataset.itemId });
+                cell.dataset.cellId = extractCellId(cell.dataset.itemId) || cellData.cellId || '';
                 cell.dataset.capacity = cellData.capacity;
                 cell.dataset.esr = cellData.esr;
                 cell.textContent = cell.dataset.cellId;
