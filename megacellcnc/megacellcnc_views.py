@@ -461,19 +461,22 @@ def update_battery_name(request):
     return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
 
 
-def _filter_cells_by_id(queryset, search_query):
-    """Find cells by database ID (same number as Device 'Cell Id')."""
+def _filter_cells_by_serial_or_id(queryset, search_query):
+    """Search Serial (UUID -S…) or database ID. Leading zeros allowed (016507)."""
     if not search_query:
         return queryset, None
+    from django.db.models import Q
     query = search_query.strip()
     if query.isdigit():
-        qs = queryset.filter(id=int(query))
+        number = int(query)
+        padded = f"{number:06d}"
+        qs = queryset.filter(
+            Q(id=number)
+            | Q(UUID__endswith=f"-S{padded}")
+            | Q(UUID__regex=rf"-S0*{number}$")
+        )
         return qs, qs.count()
-    from django.db.models import CharField
-    from django.db.models.functions import Cast
-    qs = queryset.annotate(_id_text=Cast('id', CharField(max_length=32))).filter(
-        _id_text__startswith=query
-    )
+    qs = queryset.filter(UUID__icontains=query)
     return qs, qs.count()
 
 
@@ -557,12 +560,12 @@ def database(request):
         )
         selected_project_name = Projects.objects.get(id=project_id).Name
 
-    # ID-Suche (Zahl wie auf dem Device-Bildschirm): immer alle Zellen, ohne andere Filter
+    # Serial- oder ID-Suche: alle Zellen, ohne andere Filter
     if search_query.isdigit():
-        cells_queryset = Cells.objects.select_related('project', 'battery').filter(
-            id=int(search_query)
-        ).order_by('id')
-        search_results = cells_queryset.count()
+        cells_queryset, search_results = _filter_cells_by_serial_or_id(
+            Cells.objects.select_related('project', 'battery').all().order_by('id'),
+            search_query,
+        )
     else:
         # Jahr-Filter (aus UUID extrahiert)
         if year_filter:
@@ -582,7 +585,7 @@ def database(request):
             else:
                 battery_filter = ''
 
-        cells_queryset, search_results = _filter_cells_by_id(cells_queryset, search_query)
+        cells_queryset, search_results = _filter_cells_by_serial_or_id(cells_queryset, search_query)
     
     # Extrahiere alle verfügbaren Jahre aus UUIDs
     # Verwende SQL für Performance statt Python-Loop
@@ -648,12 +651,12 @@ def database_search_ajax(request):
     page = request.GET.get('page', 1)
     per_page = int(request.GET.get('per_page', 100))
 
-    # ID-Suche: immer alle Zellen, ohne Projekt/Jahr/Status-Filter
+    # Serial- oder ID-Suche: alle Zellen, ohne andere Filter
     if search_query.isdigit():
-        cells_queryset = Cells.objects.select_related('project', 'battery').filter(
-            id=int(search_query)
-        ).order_by('id')
-        search_results = cells_queryset.count()
+        cells_queryset, search_results = _filter_cells_by_serial_or_id(
+            Cells.objects.select_related('project', 'battery').all().order_by('id'),
+            search_query,
+        )
     else:
         # Base queryset
         if project_id == 'all' or project_id is None:
@@ -681,7 +684,7 @@ def database_search_ajax(request):
             if Batteries.objects.filter(pk=bid).exists():
                 cells_queryset = cells_queryset.filter(battery_id=bid)
 
-        cells_queryset, search_results = _filter_cells_by_id(cells_queryset, search_query)
+        cells_queryset, search_results = _filter_cells_by_serial_or_id(cells_queryset, search_query)
     
     # Pagination mit dynamischer Seitengröße
     paginator = Paginator(cells_queryset, per_page)
