@@ -324,6 +324,8 @@ def build_mccpro_edit_device_data(dev_data, device, slots_count, chems, firmware
             "chemistry_id": int(_chem_field(c, 'id', default=5)),
             "cells_to_group": device.cell_to_group,
             "cells_per_group": device.cell_per_group,
+            "min_capacity_mah": device.min_capacity_mah or 0,
+            "max_esr_mohm": device.max_esr_mohm or 0,
         }
     if isinstance(dev_data, (list, tuple)) and len(dev_data) >= 16:
         return {
@@ -349,6 +351,8 @@ def build_mccpro_edit_device_data(dev_data, device, slots_count, chems, firmware
             "chemistry_id": int(dev_data[0]) if len(dev_data) > 0 else 5,
             "cells_to_group": device.cell_to_group,
             "cells_per_group": device.cell_per_group,
+            "min_capacity_mah": device.min_capacity_mah or 0,
+            "max_esr_mohm": device.max_esr_mohm or 0,
         }
     raise ValueError(f'Unbekanntes Chemistry-Format: {type(dev_data).__name__}')
 

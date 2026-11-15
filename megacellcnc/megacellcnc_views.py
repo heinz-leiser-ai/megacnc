@@ -1089,7 +1089,9 @@ def edit_device(request):
                         "charging_timeout": task_result["McH"], "device_name": device.name, "slots_count": slots_count,
                         "chems": chems, "max_capacity": 5000, "pre_charge_current": 0,
                         "term_charging_current": 0, "discharge_resistance": 0,
-                        "discharge_mode": 0, "max_low_volt_recovery_time": 120}
+                        "discharge_mode": 0, "max_low_volt_recovery_time": 120,
+                        "min_capacity_mah": device.min_capacity_mah or 0,
+                        "max_esr_mohm": device.max_esr_mohm or 0}
 
             elif dev_type in ("MCCPro", "MCCReg") and task_result is not None:
                 dev_data = _unpack_mccpro_config(task_result)
@@ -1130,7 +1132,18 @@ def save_device_settings(request):
         except (json.JSONDecodeError, TypeError, ValueError):
             return JsonResponse({'error': 'Invalid JSON or device_id'}, status=400)
 
-        get_object_or_404(Device, id=device_id)
+        device = get_object_or_404(Device, id=device_id)
+        try:
+            min_cap = int(float(data.get('minCapacityMah') or 0))
+        except (TypeError, ValueError):
+            min_cap = 0
+        try:
+            max_esr = float(data.get('maxEsrMohm') or 0)
+        except (TypeError, ValueError):
+            max_esr = 0
+        device.min_capacity_mah = max(0, min_cap)
+        device.max_esr_mohm = max(0.0, max_esr)
+        device.save(update_fields=['min_capacity_mah', 'max_esr_mohm'])
 
         try:
             ok = save_device_config.apply(args=[device_id, data]).get(timeout=90)

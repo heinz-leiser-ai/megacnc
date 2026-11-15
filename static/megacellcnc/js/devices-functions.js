@@ -371,6 +371,8 @@ function editDevice(deviceId) {
             }
 
             document.getElementById('deviceName').value = data["device_name"];
+            document.getElementById('minCapacityMah').value = data["min_capacity_mah"] ?? 0;
+            document.getElementById('maxEsrMohm').value = data["max_esr_mohm"] ?? 0;
             document.getElementById('minVoltage').value = data["discharge_volt"];
             document.getElementById('storeVoltage').value = data["store_volt"];
             document.getElementById('maxVoltage').value = data["max_charge_volt"];
@@ -555,6 +557,8 @@ function saveDeviceSettings() {
     }
 
     let deviceName = document.getElementById('deviceName').value;
+    let minCapacityMah = document.getElementById('minCapacityMah').value;
+    let maxEsrMohm = document.getElementById('maxEsrMohm').value;
     let minVoltage = document.getElementById('minVoltage').value;
     let storeVoltage = document.getElementById('storeVoltage').value;
     let maxVoltage = document.getElementById('maxVoltage').value;
@@ -592,7 +596,7 @@ function saveDeviceSettings() {
         body: JSON.stringify({
             device_id: current_device_id,
             chemistry_id: window._deviceChemistryId ?? 5,
-            deviceName, minVoltage, storeVoltage, maxVoltage,
+            deviceName, minCapacityMah, maxEsrMohm, minVoltage, storeVoltage, maxVoltage,
             chargingCurrent, dischargingCurrent, maxTemp, dischargeCycles, chargingTimeout,
             prechargeCurrent, termChargingCurrent, dischargeResistance, dischargeMode,
             maxLowVoltTime, maxCapacity, cellsToGroup, cellsPerGroup, applyToSlot,

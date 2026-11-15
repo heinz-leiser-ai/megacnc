@@ -296,6 +296,19 @@
                         <label for="deviceName" class="form-label">Device Name</label>
                         <input type="text" class="form-control" id="deviceName" name="deviceName">
                     </div>
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <small class="text-muted">Lager-Filter: Zelle gilt nur als gut, wenn MCC nicht Bad Cell meldet und die Werte passen. 0 = kein Filter.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="minCapacityMah" class="form-label">Min. Kapazität (mAh)</label>
+                            <input type="number" class="form-control" id="minCapacityMah" name="minCapacityMah" min="0" step="50" value="0" placeholder="z.B. 1700">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="maxEsrMohm" class="form-label">Max. ESR (mΩ)</label>
+                            <input type="number" class="form-control" id="maxEsrMohm" name="maxEsrMohm" min="0" step="1" value="0" placeholder="z.B. 50">
+                        </div>
+                    </div>
                     <div class="mb-3">
                         <label for="deviceChemistry" class="form-label">Chemistry</label>
                         <select class="form-select" id="deviceChemistry" name="deviceChemistry">

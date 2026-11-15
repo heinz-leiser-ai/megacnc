@@ -21,7 +21,8 @@ ACTIVE_TEST_STATES = frozenset([
     "Cell rest 5 Min",
 ])
 
-COMPLETE_STATES = frozenset(["Stored"])
+COMPLETE_STATES = frozenset(["Stored", "Bad Cell", "BadCell"])
+BAD_CELL_STATES = frozenset(["Bad Cell", "BadCell"])
 
 
 def constrain_value(min_allowed, max_allowed, actual_value):
@@ -118,8 +119,8 @@ def update_cell_data(device, slot):
             )
             new_data.save()
 
-        if _is_test_finished(slot) and (cell.available != "Yes" or not cell.removal_date):
-            mark_cell_available(cell, removed=False)
+        if _is_test_finished(slot):
+            mark_cell_available(cell, removed=False, device=device, slot_state=slot.state)
 
 
 def apply_test_stats(cell):
@@ -141,20 +142,42 @@ def apply_test_stats(cell):
     cell.max_temp_discharging = max_temp_discharging
 
 
-def mark_cell_available(cell, *, removed=False):
+def _is_bad_mcc_state(state):
+    normalized = (state or "").replace(" ", "").lower()
+    return normalized in {"badcell"} or (state or "") in BAD_CELL_STATES
+
+
+def cell_passes_quality(cell, device=None, slot_state=None):
+    if _is_bad_mcc_state(slot_state or cell.status):
+        return False
+    min_cap = getattr(device, "min_capacity_mah", 0) or 0
+    max_esr = getattr(device, "max_esr_mohm", 0) or 0
+    if min_cap > 0 and (cell.capacity or 0) < min_cap:
+        return False
+    if max_esr > 0 and (cell.esr or 0) > max_esr:
+        return False
+    return True
+
+
+def mark_cell_available(cell, *, removed=False, device=None, slot_state=None):
     if not cell:
         return
     if not cell.removal_date:
         cell.removal_date = timezone.now()
-    cell.available = "Yes"
+    if cell_passes_quality(cell, device=device, slot_state=slot_state):
+        cell.available = "Yes"
+        cell.condition = "good"
+    else:
+        cell.available = "No"
+        cell.condition = "defective"
     if removed:
         cell.status = "Removed"
     apply_test_stats(cell)
     cell.save()
 
 
-def cell_test_complete(cell):
-    mark_cell_available(cell, removed=True)
+def cell_test_complete(cell, device=None):
+    mark_cell_available(cell, removed=True, device=device, slot_state=cell.status if cell else None)
 
 
 def _ensure_slots(device_model, target_count):
@@ -226,7 +249,7 @@ def update_slot_data(device_model, tester, device_slot_count):
             if slot.saved and slot.state == "Not Inserted":
                 slot.saved = False
                 if slot.active_cell:
-                    cell_test_complete(slot.active_cell)
+                    cell_test_complete(slot.active_cell, device=device_model)
                 slot.active_cell = None
 
             slot.esr = _cell_num(cell, "esr")
