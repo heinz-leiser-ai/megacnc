@@ -105,6 +105,8 @@ class Device(models.Model):
     discharge_current = models.IntegerField(default=0)
     cell_to_group = models.IntegerField(default=16)
     cell_per_group = models.IntegerField(default=1)
+    min_capacity_mah = models.IntegerField(default=0)
+    max_esr_mohm = models.FloatField(default=0)
 
     project = models.ForeignKey('Projects', on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     global_chemistry = models.ForeignKey('Chemistry', on_delete=models.SET_NULL, null=True, blank=True)
